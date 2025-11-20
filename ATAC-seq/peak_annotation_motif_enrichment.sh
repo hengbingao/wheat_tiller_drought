@@ -1,88 +1,141 @@
-#####peak annotation and TF root motif enrichment#####
-
-#!/bin/bash 
-#PBS -q regular 
-#PBS -N peak_anno
-#PBS -l nodes=1:ppn=4 
-#PBS -l walltime=96:00:00 
+#!/bin/bash
+#PBS -q regular
+#PBS -N peak_annotation_and_fimo
+#PBS -l nodes=1:ppn=4
+#PBS -l walltime=96:00:00
 #PBS -l mem=40gb
+
+########################################
+# Working directory
+########################################
 cd /scratch/peaks_file
-for i in (ls *.narrowPeak|sed 's/.narrowPeak//g')
-do
-annotatePeaks.pl $i.narrowPeak /scratch/hbgao/wheat-ref/Ta.fa -gtf /scratch/hbgao/wheat-ref/Ta.gtf -annStats $i.txt > $i.anno.xls
-done
 
-#########################motif fimo #################
-###################shuffle 一些control序列
-for i in $(ls *.bed|sed "s/.bed/\t/g")
-do
-bedtools shuffle -i $i.bed -g /scratch/hbgao/wheat-ref/Ta.chrom.size -incl /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/merged_peak_delMYBS.bed > $i.nochange.control.bed
-done
 
-###################用fimo来寻找相关的位点#################
-for i in $(ls *.bed|sed "s/.bed/\t/g")
+########################################
+# 1. Peak annotation with HOMER
+########################################
+for i in $(ls *.narrowPeak | sed 's/.narrowPeak//')
 do
-bedtools getfasta -fi /scratch/hbgao/wheat-ref/Ta.fa -bed $i.bed > $i.fa
-fimo --oc ${i} /scratch/hbgao/wheat-ref/jasper_meme/root_cluster.meme ${i}.fa
+    annotatePeaks.pl ${i}.narrowPeak \
+        /scratch/hbgao/wheat-ref/Ta.fa \
+        -gtf /scratch/hbgao/wheat-ref/Ta.gtf \
+        -annStats ${i}.stats.txt \
+        > ${i}.anno.xls
 done
 
 
-####################整理相关的富集次数#############
-for i in $(ls *.bed|sed "s/.bed/\t/g")
+########################################
+# 2. Generate shuffled control regions (within merged ACR regions)
+########################################
+for i in $(ls *.bed | sed 's/.bed//')
 do
-cd /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/Kmeans/fimo/$i
-cut -f1 fimo.tsv|sort|uniq -c|grep -e 'cluster'|grep -v 'fimo' > /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/Kmeans/fimo/$i.txt
+    bedtools shuffle \
+        -i ${i}.bed \
+        -g /scratch/hbgao/wheat-ref/Ta.chrom.size \
+        -incl /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/merged_peak_delMYBS.bed \
+        > ${i}.control.inACR.bed
 done
 
+
+########################################
+# 3. Run FIMO motif scanning
+########################################
+for i in $(ls *.bed | sed 's/.bed//')
+do
+    bedtools getfasta \
+        -fi /scratch/hbgao/wheat-ref/Ta.fa \
+        -bed ${i}.bed \
+        > ${i}.fa
+
+    fimo --oc ${i} \
+        /scratch/hbgao/wheat-ref/jasper_meme/root_cluster.meme \
+        ${i}.fa
+done
+
+
+########################################
+# 4. Summarize motif enrichment (motif hit counts)
+########################################
+FIMO_OUT=/scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/Kmeans/fimo
+
+for i in $(ls *.bed | sed 's/.bed//')
+do
+    cd ${FIMO_OUT}/${i}
+
+    cut -f1 fimo.tsv \
+        | sort \
+        | uniq -c \
+        | grep 'cluster' \
+        | grep -v 'fimo' \
+        > ${FIMO_OUT}/${i}.txt
+done
+
+cd ${FIMO_OUT}
 paste *.txt > all_fimo.txt
-
-ls *.txt|sed 's/.txt//g'|sed 's/\n/\t/g' > header
-
-19508	12312	61871	44183	139959	139494	178940	223905	37479	27168	62932	56081	37302	37680	41453	42546
-
-cat fimo_file.txt|awk '{print $1 "\t" $1/($1-19508)}'
+ls *.txt | sed 's/.txt//' | tr '\n' '\t' > header.txt
 
 
+########################################
+# 5. FIMO on regions excluding ACRs
+########################################
+FIMO_NOACR=/scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/Kmeans/fimo_noACR
 
-
-
-
-#########################fimo noACR 
-for i in $(ls *.bed|sed "s/.bed/\t/g")
+for i in $(ls *.bed | sed 's/.bed//')
 do
-bedtools shuffle -i $i.bed -g /scratch/hbgao/wheat-ref/Ta.chrom.size -excl /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/merged_peak_delMYBS.bed > $i.nochange.control.bed
+    bedtools shuffle \
+        -i ${i}.bed \
+        -g /scratch/hbgao/wheat-ref/Ta.chrom.size \
+        -excl /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/merged_peak.bed \
+        > ${i}.control.noACR.bed
 done
 
-
-for i in $(ls *.bed|sed "s/.bed/\t/g")
+for i in $(ls *.bed | sed 's/.bed//')
 do
-bedtools getfasta -fi /scratch/hbgao/wheat-ref/Ta.fa -bed $i.bed > $i.fa
-fimo --oc ${i} /scratch/hbgao/wheat-ref/jasper_meme/root_cluster.meme ${i}.fa
+    bedtools getfasta \
+        -fi /scratch/hbgao/wheat-ref/Ta.fa \
+        -bed ${i}.bed \
+        > ${i}.fa
+
+    fimo --oc ${i} \
+        /scratch/hbgao/wheat-ref/jasper_meme/root_cluster.meme \
+        ${i}.fa
 done
 
-
-
-for i in $(ls *.bed|sed "s/.bed/\t/g")
+for i in $(ls *.bed | sed 's/.bed//')
 do
-cd /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/Kmeans/fimo_noACR/$i
-cut -f1 fimo.tsv|sort|uniq -c|grep -e 'cluster'|grep -v 'fimo' > /scratch/hbgao/ATAC_all/Tn5/DEseq2/diff_peak/sizefactor/final_peak/Kmeans/fimo_noACR/$i.txt
+    cd ${FIMO_NOACR}/${i}
+
+    cut -f1 fimo.tsv \
+        | sort \
+        | uniq -c \
+        | grep 'cluster' \
+        | grep -v 'fimo' \
+        > ${FIMO_NOACR}/${i}.txt
 done
 
+cd ${FIMO_NOACR}
 paste *.txt > all_fimo.txt
-
-ls *.txt|sed 's/.txt//g'|sed 's/\n/\t/g' > header
-
+ls *.txt | sed 's/.txt//' | tr '\n' '\t' > header.txt
 
 
-################diff peak subgenome distribution
-for i in $(ls *.bed|sed "s/.bed/\t/g")
+########################################
+# 6. Subgenome distribution of differential peaks
+########################################
+for i in $(ls *.bed | sed 's/.bed//')
 do
-cut -f1 $i.bed|sed -re 's/[1-7]//p'|sort|uniq -c > $i.ABD
+    cut -f1 ${i}.bed \
+        | sed -E 's/[1-7]//g' \
+        | sort \
+        | uniq -c \
+        > ${i}.ABD
 done
 
 
-
-for i in $(ls *.bed|sed "s/.bed/\t/g")
+########################################
+# 7. Prepare BED file with peak lengths
+########################################
+for i in $(ls *.bed | sed 's/.bed//')
 do
-awk '{print $1 "\t" $2 "\t" $3 "\t" $3-$2}' $i.bed > $i.peak.bed
+    awk '{ print $1 "\t" $2 "\t" $3 "\t" ($3 - $2) }' ${i}.bed \
+        > ${i}.peak_length.bed
 done
