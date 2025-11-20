@@ -56,7 +56,7 @@ samtools view -h sample.srtdup.bam \
     | samtools view -q 10 -F 1804 -f 0x2 - \
     > sample.filt.bam
 
-【3. Peak calling with MACS2】
+#######【3. Peak calling with MACS2】#######
 #!/bin/bash
 #PBS -q regular
 #PBS -N W_callpeak
